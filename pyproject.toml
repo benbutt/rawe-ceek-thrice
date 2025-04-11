@@ -1,0 +1,12 @@
+[project]
+name = "rawe-ceek-thrice"
+version = "0.1.0"
+description = "Add your description here"
+readme = "README.md"
+requires-python = "~=3.9"
+dependencies = [
+    "fastf1>=3.5.3",
+    "loguru>=0.7.3",
+    "pydantic>=2.11.2",
+    "urllib3<2",
+]
