@@ -1,11 +1,11 @@
 from typing import Annotated
 from datetime import datetime
 from typing_extensions import Self
-from typing import Union
+from typing import Union, Optional
 from enum import Enum
 import ast
 
-from pydantic import BaseModel, AfterValidator
+from pydantic import BaseModel, AfterValidator, TypeAdapter
 
 
 class Topic(str, Enum):
@@ -39,6 +39,18 @@ class Message(BaseModel):
 
 
 class Leader(BaseModel):
-    full_name: Annotated[str, AfterValidator(lambda x: x.title())]
-    team_color: str
+    number: int
     timestamp: datetime
+    team_colour: str
+    full_name: str
+
+
+class Driver(BaseModel):
+    broadcast_name: str
+    full_name: Annotated[str, AfterValidator(lambda x: x.title())]
+    driver_number: int
+    team_colour: str
+    team_name: str
+
+
+driver_adapter = TypeAdapter(list[Driver])
