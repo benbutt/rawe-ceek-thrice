@@ -1,14 +1,15 @@
-import os
-import signal
 import asyncio
 import datetime
+import os
+import signal
 import tempfile
-from typing import Callable, Optional, Awaitable, List
+from logging import Logger
 from tempfile import NamedTemporaryFile
+from typing import Awaitable, Callable, List, Optional
 
 from fastf1.livetiming import client
 from loguru import logger
-from logging import Logger
+
 from models import Message
 
 

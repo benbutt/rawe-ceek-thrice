@@ -1,11 +1,10 @@
-from typing import Annotated
-from datetime import datetime
-from typing_extensions import Self
-from typing import Union, Optional
-from enum import Enum
 import ast
+from datetime import datetime
+from enum import Enum
+from typing import Annotated, Union
 
-from pydantic import BaseModel, AfterValidator, TypeAdapter
+from pydantic import AfterValidator, BaseModel, TypeAdapter
+from typing_extensions import Self
 
 
 class Topic(str, Enum):
@@ -36,13 +35,6 @@ class Message(BaseModel):
     def from_line(cls, line: str) -> Self:
         topic, content, timestamp = ast.literal_eval(line)
         return cls(topic=topic, content=content, timestamp=timestamp)
-
-
-class Leader(BaseModel):
-    number: int
-    timestamp: datetime
-    team_colour: str
-    full_name: str
 
 
 class Driver(BaseModel):

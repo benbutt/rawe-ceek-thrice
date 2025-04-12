@@ -1,12 +1,13 @@
 import asyncio
+import json
 import signal
 from typing import List
 
 from loguru import logger
-from models import Message, Topic, Leader, Driver
-from record import process_live_timing
 from pydantic import TypeAdapter
-import json
+
+from models import Driver, Message, Topic
+from record import process_live_timing
 
 
 class F1DataProcessor:
