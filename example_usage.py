@@ -2,26 +2,29 @@ import asyncio
 import json
 import signal
 import time
-from typing import List, Tuple
+from contextlib import AsyncExitStack
+from typing import Dict, List, Optional, Tuple
 
 from loguru import logger
 from pydantic import TypeAdapter
 
-from models import Driver, Message, Topic
-from record import process_live_timing
+from config import TV_DELAY_SECONDS
+from models import Driver, Message, TimingAppContent, TimingCarData, Topic
+from record import RaweCeekClient
 from update_lights import create_light_state, list_lights, set_lights_states
+from utils import TaskManager, run_with_errorhandling
 
 
 class F1DataProcessor:
     """Example processor for F1 live timing data"""
 
-    def __init__(self, tv_delay_seconds: int = 57):
+    def __init__(self, tv_delay_seconds: int = TV_DELAY_SECONDS):
         self.leaders: List[Driver] = []
         self.messages_processed = 0
         self.drivers = TypeAdapter(list[Driver]).validate_python(
             json.loads(open("drivers.json").read())
         )
-        self.driver_lookup: dict[str, Driver] = {
+        self.driver_lookup: Dict[str, Driver] = {
             str(driver.driver_number): driver for driver in self.drivers
         }
         self.lights = list_lights()
@@ -29,61 +32,82 @@ class F1DataProcessor:
         # TV broadcast delay settings
         self.tv_delay_seconds = tv_delay_seconds
         self.pending_light_updates: List[Tuple[float, Driver]] = []
-        self.update_task = None
+
+    @property
+    def updater(self) -> TaskManager:
+        """Get a TaskManager for the delayed light updater.
+
+        Returns:
+            A TaskManager that can be used with async with
+        """
+        return TaskManager(self.delayed_light_updater, name="LightUpdater", timeout=1.0)
 
     async def delayed_light_updater(self):
-        """Process delayed light updates to sync with TV broadcast"""
         while True:
-            current_time = time.time()
-            updates_to_process = []
-
-            # Find all updates that are due to be processed
-            for i, (scheduled_time, driver) in enumerate(self.pending_light_updates):
-                if current_time >= scheduled_time:
-                    updates_to_process.append((i, driver))
-
-            # Process updates (from newest to oldest to avoid multiple updates)
-            if updates_to_process:
-                # Get the most recent update (we only need the latest leader)
-                _, most_recent_driver = updates_to_process[-1]
-
-                # Update the lights
-                await set_lights_states(
-                    self.lights, create_light_state(most_recent_driver)
-                )
-                logger.info(
-                    f"New leader: {most_recent_driver.full_name} for "
-                    f"{most_recent_driver.team_name}"
-                )
-
-                # Remove all processed updates
-                indices_to_remove = [i for i, _ in updates_to_process]
-                self.pending_light_updates = [
-                    update
-                    for i, update in enumerate(self.pending_light_updates)
-                    if i not in indices_to_remove
-                ]
-
-            # Sleep a short time before checking again
+            await self._process_due_updates()
             await asyncio.sleep(0.1)
 
-    async def start_delayed_updater(self):
-        """Start the delayed light updater task"""
-        self.update_task = asyncio.create_task(self.delayed_light_updater())
-        return self.update_task
+    async def _process_due_updates(self):
+        current_time = time.time()
+        updates_to_process = []
 
-    async def stop_delayed_updater(self):
-        """Stop the delayed light updater task"""
-        if self.update_task and not self.update_task.done():
-            self.update_task.cancel()
-            try:
-                await self.update_task
-            except asyncio.CancelledError:
-                logger.debug("Delayed updater task cancelled successfully")
-            except Exception as e:
-                logger.error(f"Error during updater task cancellation: {e}")
-            # Don't re-raise, just log the error
-        self.update_task = None
+        # Find all updates that are due to be processed
+        for i, (scheduled_time, driver) in enumerate(self.pending_light_updates):
+            if current_time >= scheduled_time:
+                updates_to_process.append((i, driver))
+
+        # Process updates (from newest to oldest to avoid multiple updates)
+        if updates_to_process:
+            # Get the most recent update (we only need the latest leader)
+            _, most_recent_driver = updates_to_process[-1]
+
+            # Update the lights
+            await run_with_errorhandling(
+                set_lights_states(self.lights, create_light_state(most_recent_driver)),
+                f"Failed to update lights for {most_recent_driver.full_name}",
+            )
+            logger.info(
+                f"New leader: {most_recent_driver.full_name} for "
+                f"{most_recent_driver.team_name}"
+            )
+
+            # Remove all processed updates
+            indices_to_remove = [i for i, _ in updates_to_process]
+            remove_set = set(indices_to_remove)
+            self.pending_light_updates = [
+                update
+                for i, update in enumerate(self.pending_light_updates)
+                if i not in remove_set
+            ]
+
+    def _extract_leader_from_timing_data(
+        self, data: Dict[str, TimingCarData]
+    ) -> Optional[str]:
+        """Extract the car number of the current leader from timing data.
+
+        Args:
+            data: The Lines dictionary from TimingAppData
+
+        Returns:
+            The car number of the leader or None if not found
+        """
+        for car_number, car_data in data.items():
+            if car_data.Line == 1:
+                return car_number
+        return None
+
+    def _schedule_light_update(self, leader: Driver) -> None:
+        """Schedule a light update for the given leader.
+
+        Args:
+            leader: The driver who is now the leader
+        """
+        current_time = time.time()
+        scheduled_time = current_time + self.tv_delay_seconds
+        self.pending_light_updates.append((scheduled_time, leader))
+        logger.debug(
+            f"Scheduled light update for {leader.full_name} in {self.tv_delay_seconds} seconds"
+        )
 
     async def process_message(self, message: Message):
         """Process a message asynchronously from the F1 timing data stream"""
@@ -93,83 +117,82 @@ class F1DataProcessor:
         if self.messages_processed % 1000 == 0:
             logger.debug(f"Processed {self.messages_processed} messages so far...")
 
-        # Process leader information from TimingAppData
-        if (
-            message.topic == Topic.TimingAppData
-            and isinstance(message.content, dict)
-            and message.content.get("Lines")
-        ):
-            # Loop through all cars in this update
-            for car_number, car_data in message.content["Lines"].items():
-                # Check if this car has Line position 1 (the leader)
-                if car_data.get("Line") == 1:
-                    # Create and store the leader information
-                    leader = self.driver_lookup.get(car_number)
-                    if not leader:
-                        continue
+        # Only process TimingAppData messages
+        if message.topic != Topic.TimingAppData:
+            return
 
-                    # Only add if it's a different leader than last recorded
-                    if (
-                        not self.leaders
-                        or self.leaders[-1].driver_number != leader.driver_number
-                    ):
-                        self.leaders.append(leader)
-                        logger.debug(
-                            f"New leader at {message.timestamp}: {leader.full_name}"
-                        )
+        # Ensure content is the expected format
+        if not isinstance(message.content, dict) or "Lines" not in message.content:
+            return
 
-                        # Schedule light update with delay
-                        current_time = time.time()
-                        scheduled_time = current_time + self.tv_delay_seconds
-                        self.pending_light_updates.append((scheduled_time, leader))
-                        logger.debug(
-                            f"Scheduled light update for {leader.full_name} in {self.tv_delay_seconds} seconds"
-                        )
-                    break
+        # Parse the content as a TimingAppContent model
+        try:
+            timing_content = TimingAppContent.model_validate(message.content)
+        except Exception as e:
+            logger.warning(f"Failed to parse timing content: {e}")
+            return
+
+        # Extract the car number of the current leader
+        leader_car_number = self._extract_leader_from_timing_data(timing_content.Lines)
+        if not leader_car_number:
+            return
+
+        # Look up the driver information
+        leader = self.driver_lookup.get(leader_car_number)
+        if not leader:
+            return
+
+        # Check if this is a new leader
+        is_new_leader = (
+            not self.leaders or self.leaders[-1].driver_number != leader.driver_number
+        )
+        if is_new_leader:
+            self.leaders.append(leader)
+            logger.debug(f"New leader at {message.timestamp}: {leader.full_name}")
+            self._schedule_light_update(leader)
+
+    async def create_timing_client(self) -> RaweCeekClient:
+        """Create and configure F1 timing client for data processing"""
+        # Return a RaweCeekClient configured for our needs
+        return RaweCeekClient(
+            filename=None,  # No file output
+            timeout=1800,
+            message_processor=self.process_message,
+            logger_instance=logger,
+        )
 
 
 async def main():
     # Create the data processor
     processor = F1DataProcessor()
-
-    # Start processing data
     logger.info("Starting F1 live timing data processing")
 
-    # Setup a way to handle cancellation
-    stop_event = asyncio.Event()
+    # Exit stack for managing multiple context managers
+    async with AsyncExitStack() as exit_stack:
+        # Start the delayed light updater using the property-based approach
+        await exit_stack.enter_async_context(processor.updater)
+        logger.debug("Started delayed light updater")
 
-    # Handle signals for graceful shutdown
-    loop = asyncio.get_running_loop()
+        # Setup signal handling for clean shutdown
+        shutdown_requested = asyncio.Event()
+        loop = asyncio.get_running_loop()
 
-    async def signal_handler():
-        logger.info("Shutdown signal received")
-        stop_event.set()
-        # Stop the delayed updater task first
-        await processor.stop_delayed_updater()
+        async def handle_signal():
+            logger.info("Shutdown signal received")
+            shutdown_requested.set()
 
-    # Register signal handlers for async handling
-    for sig in (signal.SIGINT, signal.SIGTERM):
-        loop.add_signal_handler(sig, lambda: asyncio.create_task(signal_handler()))
+        for sig in (signal.SIGINT, signal.SIGTERM):
+            loop.add_signal_handler(sig, lambda: asyncio.create_task(handle_signal()))
 
-    try:
-        # Start the delayed light updater
-        await processor.start_delayed_updater()
+        # Start the live timing processor
+        client = await processor.create_timing_client()
+        client_task = TaskManager(client.run, name="LiveTimingClient", timeout=2.0)
+        await exit_stack.enter_async_context(client_task)
 
-        # Process messages without saving to file
-        await process_live_timing(
-            output=None,  # No file output
-            timeout=1800,
-            message_processor=processor.process_message,
-            logger_instance=logger,
-        )
-    except asyncio.CancelledError:
-        logger.info("Main task was cancelled")
-    except Exception as e:
-        logger.error(f"Error during processing: {e}")
-    finally:
-        # Make sure to stop the updater task if it hasn't been stopped already
-        if processor.update_task and not processor.update_task.done():
-            await processor.stop_delayed_updater()
+        # Wait for shutdown signal
+        await shutdown_requested.wait()
+
+    # Context managers have been exited, tasks cleaned up
 
     # Display summary of processed data
     logger.info(f"Processed {processor.messages_processed} total messages")

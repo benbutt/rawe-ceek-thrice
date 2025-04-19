@@ -4,19 +4,19 @@ import os
 import signal
 import tempfile
 from logging import Logger
-from tempfile import NamedTemporaryFile
-from typing import Awaitable, Callable, List, Optional
+from typing import Awaitable, Callable, Optional
 
 from fastf1.livetiming import client
 from loguru import logger
 
 from models import Message
+from utils import run_with_errorhandling
 
 
 class RaweCeekClient(client.SignalRClient):
     def __init__(
         self,
-        filename: str = None,
+        filename: Optional[str] = None,
         filemode: str = "w",
         debug: bool = False,
         timeout: int = 60,
@@ -24,7 +24,7 @@ class RaweCeekClient(client.SignalRClient):
         logger_instance: Optional[Logger] = None,
     ):
         """
-        Enhanced SignalRClient that can process messages using the Message model.
+        Enhanced SignalRClient that processes messages using the Message model.
 
         Args:
             filename: Optional filename to write raw data
@@ -35,18 +35,19 @@ class RaweCeekClient(client.SignalRClient):
             logger_instance: Optional logger instance
         """
         self.message_processor = message_processor
-        self.shutdown_event = asyncio.Event()
         self.log = logger_instance or logger
-        self._temp_file: Optional[NamedTemporaryFile] = None
-        self._tasks: List[asyncio.Task] = []
+        self.shutdown_event = asyncio.Event()
+        self.client_task = None
+        self._temp_file = None
+        self.save_to_file = filename is not None
 
-        # Create a temporary file if no filename provided
-        if not filename:
+        # FastF1 client requires a filename, create a temporary one if needed
+        if filename is None:
             self._temp_file = tempfile.NamedTemporaryFile(
-                mode=filemode, delete=False, suffix=".txt", prefix="f1_timing_"
+                delete=False, suffix=".txt", prefix="f1_timing_"
             )
             filename = self._temp_file.name
-            self.log.debug(f"Created temporary file: {filename}")
+            self.log.debug(f"Created temporary file for internal use: {filename}")
 
         super().__init__(
             filename=filename,
@@ -57,7 +58,7 @@ class RaweCeekClient(client.SignalRClient):
         )
 
     async def _on_message(self, msg):
-        """Override the message handler to process with our model"""
+        """Process message with our model and call user-provided processor"""
         if self.shutdown_event.is_set():
             return
 
@@ -77,79 +78,51 @@ class RaweCeekClient(client.SignalRClient):
             if self.message_processor:
                 await self.message_processor(message)
 
-            # Still write to file if a filename was provided
-            if hasattr(self, "_output_file") and self._output_file:
+            # Only write to file if explicitly requested with a filename
+            if self.save_to_file and self._output_file:
                 await super()._on_message(msg)
 
         except Exception as e:
             self.log.exception(f"Exception while processing message: {e}")
 
-    async def _async_start(self):
-        """Override to track tasks for clean cancellation"""
+    async def run(self):
+        """Connect to the data stream and start processing messages"""
         self.log.info("Starting RaweCeek live timing client")
-
-        # Create the tasks and track them for later cancellation
-        supervise_task = asyncio.create_task(self._supervise())
-        run_task = asyncio.create_task(self._run())
-
-        self._tasks = [supervise_task, run_task]
-
-        # Wait for both tasks to complete
-        await asyncio.gather(*self._tasks)
-
-        # Close the output file if it's still open
-        if hasattr(self, "_output_file") and self._output_file:
-            self._output_file.close()
-
-    async def async_start(self):
-        """
-        Connect to the data stream and start processing messages.
-        Overridden to handle task cancellation gracefully.
-        """
         try:
-            await self._async_start()
+            # Create and run the tasks
+            supervise_task = asyncio.create_task(self._supervise())
+            run_task = asyncio.create_task(self._run())
+
+            # Wait for completion
+            await asyncio.gather(supervise_task, run_task)
         except asyncio.CancelledError:
-            # Suppress the warning from parent class
-            pass
+            self.log.info("Client task was cancelled")
+        except Exception as e:
+            self.log.error(f"Error in client: {e}")
+        finally:
+            # Close the output file if it's still open
+            if hasattr(self, "_output_file") and self._output_file:
+                self._output_file.close()
+
+            # Delete temporary file if we created one
+            if self._temp_file and not self.save_to_file:
+                try:
+                    os.unlink(self._temp_file.name)
+                    self.log.debug(f"Removed temporary file: {self._temp_file.name}")
+                except Exception as e:
+                    self.log.warning(f"Failed to remove temporary file: {e}")
 
     async def shutdown(self):
         """Gracefully shutdown the client"""
-        self.log.info("Shutting down RaweCeekClient...")
+        self.log.info("Shutting down RaweCeekClient")
         self.shutdown_event.set()
-
-        # Cancel all tracked tasks that are still running
-        pending_tasks = [task for task in self._tasks if not task.done()]
-
-        for task in pending_tasks:
-            task.cancel()
-
-        if pending_tasks:
-            try:
-                await asyncio.wait(pending_tasks, timeout=1.0)
-            except asyncio.CancelledError:
-                pass
 
         # Close the connection
         if hasattr(self, "_connection") and self._connection:
-            self.log.debug("Closing SignalR connection...")
             self._connection.close()
 
-        # Close the output file if it's still open
-        if hasattr(self, "_output_file") and self._output_file:
-            self.log.debug("Closing output file...")
-            self._output_file.close()
 
-        # Clean up temporary file if we created one
-        if self._temp_file:
-            try:
-                self.log.debug(f"Removing temporary file: {self._temp_file.name}")
-                os.unlink(self._temp_file.name)
-            except Exception as e:
-                self.log.warning(f"Failed to remove temporary file: {e}")
-
-        self.log.info("Shutdown complete")
-
-
+# Simple version for backward compatibility
 async def process_live_timing(
     output: Optional[str] = None,
     append: bool = False,
@@ -159,7 +132,8 @@ async def process_live_timing(
     logger_instance: Optional[Logger] = None,
 ) -> int:
     """
-    Asynchronously process live timing data with a callback function and/or save it to a file.
+    Asynchronously process live timing data.
+    For new code, consider using RaweCeekClient directly with TaskManager.
 
     Args:
         output: Optional path to save raw data
@@ -168,81 +142,53 @@ async def process_live_timing(
         timeout: Timeout in seconds
         message_processor: Async callback function to process messages
         logger_instance: Optional logger instance for logging
+
+    Returns:
+        int: 0 on success, 1 on error
     """
-    # Use provided logger or default
     log = logger_instance or logger
 
-    # Create directory if output is specified
-    if output:
+    if output and os.path.dirname(output):
         os.makedirs(os.path.dirname(output), exist_ok=True)
 
-    # Set file mode
-    mode = "a" if append else "w"
-
-    # Create the client
-    action = "saving to file" if output else "processing"
-    log.info(f"Starting live timing client, {action}")
-    log.info(
-        "Note: Default FastF1 client records all topics (topics parameter is ignored)"
-    )
-
-    # Create our enhanced client
+    # Create client
     client = RaweCeekClient(
         filename=output,
-        filemode=mode,
+        filemode="a" if append else "w",
         debug=debug,
         timeout=timeout,
         message_processor=message_processor,
         logger_instance=logger_instance,
     )
 
-    # Setup signal handling for graceful shutdown
+    # Setup signal handling
+    shutdown = asyncio.Event()
+
+    def signal_handler():
+        shutdown.set()
+
     loop = asyncio.get_running_loop()
-    shutdown_complete = loop.create_future()
-
-    async def handle_shutdown():
-        log.info("Received signal, shutting down...")
-        await client.shutdown()
-        shutdown_complete.set_result(True)
-
-    # Register signal handlers for graceful shutdown
     for sig in (signal.SIGINT, signal.SIGTERM):
-        loop.add_signal_handler(sig, lambda: asyncio.create_task(handle_shutdown()))
+        loop.add_signal_handler(sig, signal_handler)
 
     try:
-        # Start the client asynchronously
-        log.info("Connected to F1 live timing. Press Ctrl+C to stop.")
+        # Run the client in the background
+        client_task = asyncio.create_task(client.run())
 
-        # Run until shutdown is triggered
-        client_task = asyncio.create_task(client.async_start())
-
-        # Wait for either client task to complete or shutdown signal
+        # Wait for either completion or shutdown
         done, _ = await asyncio.wait(
-            [client_task, shutdown_complete], return_when=asyncio.FIRST_COMPLETED
+            [client_task, shutdown.wait()], return_when=asyncio.FIRST_COMPLETED
         )
 
-        # If client task completed normally (not by shutdown)
-        if client_task in done and not shutdown_complete.done():
-            # Check for exceptions
-            try:
-                await client_task
-            except Exception as e:
-                log.error(f"Client task ended with error: {e}")
-                await client.shutdown()
-                return 1
-
-            # If we got here without shutdown being triggered, do it now
-            log.info("Client task completed normally, shutting down...")
-            await client.shutdown()
-
-        return 0
-
-    except asyncio.CancelledError:
-        # Handle task cancellation gracefully
-        log.info("Process was cancelled, shutting down...")
-        await client.shutdown()
-        return 0
-    except Exception as e:
-        log.error(f"Error processing live timing data: {e}")
-        await client.shutdown()
+        if client_task in done:
+            return 0
+        else:
+            # Shutdown was triggered
+            client_task.cancel()
+            return 0
+    except Exception:
+        log.exception("Error in live timing processing")
         return 1
+    finally:
+        # Clean up
+        await run_with_errorhandling(client.shutdown(), "Error during client shutdown")
