@@ -5,8 +5,15 @@ description = "Add your description here"
 readme = "README.md"
 requires-python = "~=3.9"
 dependencies = [
+    "aiohttp>=3.11.16",
+    "colormath>=3.0.0",
+    "dotenv>=0.9.9",
     "fastf1>=3.5.3",
     "loguru>=0.7.3",
     "pydantic>=2.11.2",
+    "pydantic-extra-types>=2.10.3",
     "urllib3<2",
 ]
+
+[tool.ruff.lint]
+extend-select = ["I"]

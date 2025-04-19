@@ -3,7 +3,9 @@ from datetime import datetime
 from enum import Enum
 from typing import Annotated, Union
 
-from pydantic import AfterValidator, BaseModel, TypeAdapter
+from colormath import color_conversions, color_objects
+from pydantic import AfterValidator, BaseModel, TypeAdapter, computed_field
+from pydantic_extra_types.color import Color
 from typing_extensions import Self
 
 
@@ -41,8 +43,14 @@ class Driver(BaseModel):
     broadcast_name: str
     full_name: Annotated[str, AfterValidator(lambda x: x.title())]
     driver_number: int
-    team_colour: str
+    team_colour: Color
     team_name: str
+
+    @computed_field
+    def xy_colour(self) -> str:
+        rgb = color_objects.sRGBColor(*self.team_colour.as_rgb_tuple())
+        xy = color_conversions.convert_color(rgb, color_objects.xyYColor)
+        return xy
 
 
 driver_adapter = TypeAdapter(list[Driver])
