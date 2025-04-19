@@ -21,6 +21,8 @@ class F1DataProcessor:
     def __init__(self, tv_delay_seconds: int = TV_DELAY_SECONDS):
         self.leaders: List[Driver] = []
         self.messages_processed = 0
+        # TODO: Get this via API call
+        # Use https://openf1.org/#drivers
         self.drivers = TypeAdapter(list[Driver]).validate_python(
             json.loads(open("drivers.json").read())
         )

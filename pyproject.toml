@@ -17,3 +17,15 @@ dependencies = [
 
 [tool.ruff.lint]
 extend-select = ["I"]
+
+[dependency-groups]
+tests = ["pytest>=8.3.5", "pytest-asyncio>=0.26.0", "pytest-cov>=6.1.1"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+python_files = "test_*.py"
+python_classes = "Test*"
+python_functions = "test_*"
+markers = ["asyncio: mark a test as an asyncio test"]
+asyncio_mode = "auto"
+asyncio_default_fixture_loop_scope = "function"
