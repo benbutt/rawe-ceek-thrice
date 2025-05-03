@@ -1,6 +1,7 @@
 import asyncio
 import json
 import time
+from enum import Enum
 from typing import Dict, List, Optional, Tuple
 
 from loguru import logger
@@ -23,6 +24,15 @@ from rawe_ceek_thrice.lights.update_lights import (
 )
 
 
+class ConnectionState(Enum):
+    """Enum representing the connection state to the F1 timing data stream"""
+
+    INITIALIZING = "initializing"
+    CONNECTED = "connected"
+    STALE = "stale"
+    DISCONNECTED = "disconnected"
+
+
 class F1DataProcessor:
     """Processor for F1 live timing data that updates Philips Hue lights based on race leader"""
 
@@ -43,6 +53,13 @@ class F1DataProcessor:
         self.tv_delay_seconds = tv_delay_seconds
         self.pending_light_updates: List[Tuple[float, Driver]] = []
 
+        # Connection state tracking
+        self.connection_state = ConnectionState.INITIALIZING
+        self.last_message_time = 0
+        self.connection_timeout = (
+            10  # seconds without messages before considering connection stale
+        )
+
     @property
     def updater(self) -> TaskManager:
         """Get a TaskManager for the delayed light updater.
@@ -51,6 +68,47 @@ class F1DataProcessor:
             A TaskManager that can be used with async with
         """
         return TaskManager(self.delayed_light_updater, name="LightUpdater", timeout=1.0)
+
+    @property
+    def connection_monitor(self) -> TaskManager:
+        """Get a TaskManager for the connection health monitor.
+
+        Returns:
+            A TaskManager that can be used with async with
+        """
+        return TaskManager(
+            self.monitor_connection_health, name="ConnectionMonitor", timeout=1.0
+        )
+
+    async def monitor_connection_health(self):
+        """Monitor the health of the connection to the F1 timing data stream"""
+        while True:
+            current_time = time.time()
+            time_since_last_message = current_time - self.last_message_time
+
+            # Skip the check if we haven't received any messages yet
+            if self.last_message_time == 0:
+                await asyncio.sleep(1)
+                continue
+
+            # Update connection state based on message frequency
+            previous_state = self.connection_state
+
+            if time_since_last_message > self.connection_timeout:
+                self.connection_state = ConnectionState.STALE
+            else:
+                self.connection_state = ConnectionState.CONNECTED
+
+            # Log state changes
+            if previous_state != self.connection_state:
+                if self.connection_state == ConnectionState.CONNECTED:
+                    logger.info("Connection established - receiving data")
+                elif self.connection_state == ConnectionState.STALE:
+                    logger.warning(
+                        f"Connection appears stale - no messages for {time_since_last_message:.1f} seconds"
+                    )
+
+            await asyncio.sleep(1)
 
     async def delayed_light_updater(self):
         while True:
@@ -121,15 +179,20 @@ class F1DataProcessor:
 
     async def process_message(self, message: Message):
         """Process a message asynchronously from the F1 timing data stream"""
+        # Update connection state tracking
+        self.last_message_time = time.time()
+
+        # If this is the first message, update the connection state
+        if self.messages_processed == 0:
+            previous_state = self.connection_state
+            self.connection_state = ConnectionState.CONNECTED
+            if previous_state != self.connection_state:
+                logger.info("Initial connection established - received first message")
+
         self.messages_processed += 1
 
-        # Progressive logging - more frequent for early messages
-        if (
-            (self.messages_processed <= 10)
-            or (self.messages_processed <= 100 and self.messages_processed % 10 == 0)
-            or (self.messages_processed <= 1000 and self.messages_processed % 100 == 0)
-            or (self.messages_processed % 1000 == 0)
-        ):
+        # Log milestone message counts
+        if self.messages_processed % 1000 == 0:
             logger.debug(f"Processed {self.messages_processed} messages so far...")
 
         # Only process TimingAppData messages

@@ -4,6 +4,8 @@ from pathlib import Path
 # Add the parent directory to sys.path so we can import the project modules
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
+from colormath.color_objects import xyYColor
+
 from rawe_ceek_thrice.data.models import (
     Device,
     Driver,
@@ -12,7 +14,6 @@ from rawe_ceek_thrice.data.models import (
     TimingCarData,
     Topic,
 )
-from colormath.color_objects import xyYColor
 
 
 class TestModels:

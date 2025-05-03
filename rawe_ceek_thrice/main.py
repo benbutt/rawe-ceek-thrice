@@ -19,6 +19,10 @@ async def main():
         await exit_stack.enter_async_context(processor.updater)
         logger.debug("Started delayed light updater")
 
+        # Start the connection health monitor
+        await exit_stack.enter_async_context(processor.connection_monitor)
+        logger.debug("Started connection health monitor")
+
         # Setup signal handling for clean shutdown
         shutdown_requested = asyncio.Event()
         loop = asyncio.get_running_loop()
@@ -43,6 +47,7 @@ async def main():
     # Display summary of processed data
     logger.info(f"Processed {processor.messages_processed} total messages")
     logger.info(f"Tracked {len(processor.leaders)} leader changes")
+    logger.info(f"Final connection state: {processor.connection_state.value}")
 
 
 if __name__ == "__main__":

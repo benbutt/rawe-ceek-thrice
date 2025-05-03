@@ -8,9 +8,9 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 
 import pytest
 
-from rawe_ceek_thrice.data.processor import F1DataProcessor
-from rawe_ceek_thrice.data.models import Message, TimingCarData, Topic
 from rawe_ceek_thrice.core.utils import TaskManager
+from rawe_ceek_thrice.data.models import Message, TimingCarData, Topic
+from rawe_ceek_thrice.data.processor import F1DataProcessor
 
 
 class TestF1DataProcessor:
