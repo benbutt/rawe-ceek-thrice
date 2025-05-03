@@ -36,7 +36,7 @@ class ConnectionState(Enum):
 class F1DataProcessor:
     """Processor for F1 live timing data that updates Philips Hue lights based on race leader"""
 
-    def __init__(self, tv_delay_seconds: int = TV_DELAY_SECONDS):
+    def __init__(self, tv_delay_seconds: float = TV_DELAY_SECONDS):
         self.leaders: List[Driver] = []
         self.messages_processed = 0
         # TODO: Get this via API call
@@ -83,32 +83,44 @@ class F1DataProcessor:
     async def monitor_connection_health(self):
         """Monitor the health of the connection to the F1 timing data stream"""
         while True:
-            current_time = time.time()
-            time_since_last_message = current_time - self.last_message_time
-
-            # Skip the check if we haven't received any messages yet
-            if self.last_message_time == 0:
-                await asyncio.sleep(1)
-                continue
-
-            # Update connection state based on message frequency
-            previous_state = self.connection_state
-
-            if time_since_last_message > self.connection_timeout:
-                self.connection_state = ConnectionState.STALE
-            else:
-                self.connection_state = ConnectionState.CONNECTED
-
-            # Log state changes
-            if previous_state != self.connection_state:
-                if self.connection_state == ConnectionState.CONNECTED:
-                    logger.info("Connection established - receiving data")
-                elif self.connection_state == ConnectionState.STALE:
-                    logger.warning(
-                        f"Connection appears stale - no messages for {time_since_last_message:.1f} seconds"
-                    )
-
+            await self._check_connection_health()
             await asyncio.sleep(1)
+
+    async def _check_connection_health(self):
+        """Check the health of the connection and update state accordingly"""
+        current_time = time.time()
+        time_since_last_message = current_time - self.last_message_time
+
+        # Skip the check if we haven't received any messages yet
+        if self.last_message_time == 0:
+            return
+
+        # Update connection state based on message frequency
+        previous_state = self.connection_state
+
+        # Use different thresholds for different connection states
+        if time_since_last_message > self.connection_timeout * 3:
+            self.connection_state = ConnectionState.DISCONNECTED
+        elif time_since_last_message > self.connection_timeout:
+            self.connection_state = ConnectionState.STALE
+        else:
+            self.connection_state = ConnectionState.CONNECTED
+
+        # Log state changes
+        if previous_state != self.connection_state:
+            if self.connection_state == ConnectionState.CONNECTED:
+                logger.info("Connection established - receiving data")
+            elif self.connection_state == ConnectionState.STALE:
+                logger.warning(
+                    f"Connection appears stale - no messages for {time_since_last_message:.1f} seconds"
+                )
+            elif self.connection_state == ConnectionState.DISCONNECTED:
+                logger.error(
+                    f"Connection lost - no messages for {time_since_last_message:.1f} seconds"
+                )
+
+    # Add __wrapped__ attribute for testing
+    monitor_connection_health.__wrapped__ = _check_connection_health
 
     async def delayed_light_updater(self):
         while True:
