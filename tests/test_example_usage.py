@@ -8,24 +8,26 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 
 import pytest
 
-from example_usage import F1DataProcessor
-from models import Message, TimingCarData, Topic
-from utils import TaskManager
+from rawe_ceek_thrice.data.processor import F1DataProcessor
+from rawe_ceek_thrice.data.models import Message, TimingCarData, Topic
+from rawe_ceek_thrice.core.utils import TaskManager
 
 
 class TestF1DataProcessor:
     @pytest.fixture
     def processor(self, sample_drivers):
         """Fixture for F1DataProcessor instance with mock drivers"""
-        with patch("example_usage.TypeAdapter") as mock_adapter:
+        with patch("rawe_ceek_thrice.data.processor.TypeAdapter") as mock_adapter:
             # Mock the driver adapter to return our sample drivers
             mock_validate = MagicMock()
             mock_validate.validate_python.return_value = sample_drivers
             mock_adapter.return_value = mock_validate
 
             # Mock list_lights to avoid real API calls
-            with patch("example_usage.list_lights") as mock_list_lights:
-                with patch("example_usage.logger") as mock_logger:
+            with patch(
+                "rawe_ceek_thrice.data.processor.list_lights"
+            ) as mock_list_lights:
+                with patch("rawe_ceek_thrice.data.processor.logger") as mock_logger:
                     mock_list_lights.return_value = [MagicMock(), MagicMock()]
 
                     # Create the processor with a shorter TV delay for testing
@@ -83,7 +85,7 @@ class TestF1DataProcessor:
             processor._process_due_updates.assert_called_once()
 
     @pytest.mark.asyncio
-    @patch("example_usage.set_lights_states")
+    @patch("rawe_ceek_thrice.data.processor.set_lights_states")
     async def test_process_due_updates(
         self, mock_set_lights, processor, sample_drivers
     ):
@@ -219,7 +221,7 @@ class TestF1DataProcessor:
         assert len(processor.pending_light_updates) == 2
 
     @pytest.mark.asyncio
-    @patch("example_usage.RaweCeekClient")
+    @patch("rawe_ceek_thrice.data.processor.RaweCeekClient")
     async def test_create_timing_client(self, mock_client_class, processor):
         """Test the create_timing_client method"""
         # Set up the mock

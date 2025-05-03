@@ -14,14 +14,14 @@ class TestConfig:
     def test_config_loads_env_vars(self, mock_env_config):
         """Test that config loads environment variables correctly"""
         # Import here to ensure we use the mocked environment variables
-        import config
+        import rawe_ceek_thrice.core.config as config
 
         reload(config)  # Make sure we reload to get the mocked values
 
         assert config.HUE_BRIDGE_IP == "192.168.1.165"
         assert config.HUE_USERNAME == "testuser"
         assert config.HUE_CLIENT_KEY == "testkey"
-        assert config.TV_DELAY_SECONDS == "30"  # Should be a string
+        assert config.TV_DELAY_SECONDS == 30  # Now expecting an integer
 
     def test_config_default_values(self):
         """Test default values when environment variables are not set"""
@@ -32,11 +32,11 @@ class TestConfig:
             clear=True,
         ):
             # Re-import to reload with new environment
-            import config
+            import rawe_ceek_thrice.core.config as config
 
             reload(config)
 
-            assert config.TV_DELAY_SECONDS == "57"  # Default value is a string
+            assert config.TV_DELAY_SECONDS == 57  # Now expecting an integer
 
     def test_config_validation(self):
         """Test validation of required environment variables"""
@@ -46,7 +46,7 @@ class TestConfig:
             with patch.dict(os.environ, {}, clear=True):
                 # This should raise ValueError because both HUE_USERNAME and HUE_BRIDGE_IP are missing
                 with pytest.raises(ValueError) as excinfo:
-                    import config
+                    import rawe_ceek_thrice.core.config as config
 
                     reload(config)
 

@@ -7,8 +7,16 @@ import urllib3
 from loguru import logger
 from pydantic import TypeAdapter
 
-from config import HUE_BRIDGE_IP, HUE_USERNAME
-from models import Color, Device, Dimming, Driver, LightState, Power, XYColor
+from rawe_ceek_thrice.core.config import HUE_BRIDGE_IP, HUE_USERNAME
+from rawe_ceek_thrice.data.models import (
+    Color,
+    Device,
+    Dimming,
+    Driver,
+    LightState,
+    Power,
+    XYColor,
+)
 
 # Disable insecure request warnings
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)

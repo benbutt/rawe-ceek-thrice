@@ -1,7 +1,7 @@
 [project]
 name = "rawe-ceek-thrice"
 version = "0.1.0"
-description = "Add your description here"
+description = "F1 Live Timing to Philips Hue Bridge"
 readme = "README.md"
 requires-python = "~=3.9"
 dependencies = [
@@ -14,6 +14,9 @@ dependencies = [
     "pydantic-extra-types>=2.10.3",
     "urllib3<2",
 ]
+
+[project.scripts]
+rawe-ceek = "rawe_ceek_thrice.main:main"
 
 [tool.ruff.lint]
 extend-select = ["I"]

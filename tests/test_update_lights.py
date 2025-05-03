@@ -2,14 +2,22 @@ import sys
 from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock, patch
 
-# Add the parent directory to sys.path so we can import the project modules
-sys.path.insert(0, str(Path(__file__).parent.parent))
-
 import aiohttp
 import pytest
 
-from models import Color, Device, Dimming, LightState, Power, Service, XYColor
-from update_lights import (
+# Add the parent directory to sys.path so we can import the project modules
+sys.path.insert(0, str(Path(__file__).parent.parent))
+
+from rawe_ceek_thrice.data.models import (
+    Color,
+    Device,
+    Dimming,
+    LightState,
+    Power,
+    Service,
+    XYColor,
+)
+from rawe_ceek_thrice.lights.update_lights import (
     create_light_state,
     list_devices,
     list_lights,
@@ -19,7 +27,7 @@ from update_lights import (
 
 
 class TestLightFunctions:
-    @patch("update_lights.requests.get")
+    @patch("rawe_ceek_thrice.lights.update_lights.requests.get")
     def test_list_devices(self, mock_get, sample_devices):
         """Test list_devices function"""
         # Mock response
@@ -38,7 +46,7 @@ class TestLightFunctions:
         assert all(isinstance(device, Device) for device in devices)
         assert devices[0].id == sample_devices[0].id
 
-    @patch("update_lights.list_devices")
+    @patch("rawe_ceek_thrice.lights.update_lights.list_devices")
     def test_list_lights(self, mock_list_devices, sample_devices):
         """Test list_lights function"""
         # Mock list_devices to return our sample devices
@@ -65,10 +73,10 @@ class TestLightFunctions:
         assert light_state.color.xy.x == driver.xy_colour.xyy_x
         assert light_state.color.xy.y == driver.xy_colour.xyy_y
 
+    @patch("rawe_ceek_thrice.lights.update_lights.HUE_BRIDGE_IP", "192.168.1.165")
+    @patch("rawe_ceek_thrice.lights.update_lights.HUE_USERNAME", "testuser")
     @pytest.mark.asyncio
-    @patch("update_lights.HUE_BRIDGE_IP", "192.168.1.165")
-    @patch("update_lights.HUE_USERNAME", "testuser")
-    async def test_set_light_state(self):
+    async def test_set_light_state(self, sample_devices):
         """Test set_light_state function"""
         # Create a device with proper Service objects
         light = Device(
@@ -158,7 +166,7 @@ class TestLightFunctions:
         mock_session.put.assert_not_called()
 
     @pytest.mark.asyncio
-    @patch("update_lights.set_light_state")
+    @patch("rawe_ceek_thrice.lights.update_lights.set_light_state")
     async def test_set_lights_states(self, mock_set_light_state, sample_devices):
         """Test set_lights_states function"""
         lights = sample_devices

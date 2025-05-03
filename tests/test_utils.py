@@ -1,14 +1,14 @@
 import asyncio
 import sys
 from pathlib import Path
-from unittest.mock import AsyncMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
+
+import pytest
 
 # Add the parent directory to sys.path so we can import the project modules
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-import pytest
-
-from utils import TaskManager, run_with_errorhandling
+from rawe_ceek_thrice.core.utils import TaskManager, run_with_errorhandling
 
 
 class TestTaskManager:
@@ -99,16 +99,14 @@ class TestErrorHandling:
             raise ValueError("Something went wrong")
 
         # Create a properly mocked logger that doesn't require awaiting
-        with patch("utils.logger.error") as mock_logger:
-            # Make sure the mock doesn't return an awaitable
-            mock_logger.return_value = None
+        with patch("rawe_ceek_thrice.core.utils.logger.error") as mock_logger:
+            # Call the function with our failing coroutine
+            result = await run_with_errorhandling(failure_coro(), "Test error")
 
-            result = await run_with_errorhandling(
-                failure_coro(), "This operation failed"
-            )
+            # Verify
             assert result is None
             mock_logger.assert_called_once()
-            assert "This operation failed" in mock_logger.call_args[0][0]
+            assert "Test error" in mock_logger.call_args[0][0]
 
     async def test_run_with_errorhandling_cancelled(self):
         """Test run_with_errorhandling with cancelled operation"""

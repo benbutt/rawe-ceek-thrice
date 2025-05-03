@@ -9,8 +9,8 @@ from typing import Awaitable, Callable, Optional
 from fastf1.livetiming import client
 from loguru import logger
 
-from models import Message
-from utils import run_with_errorhandling
+from rawe_ceek_thrice.core.utils import run_with_errorhandling
+from rawe_ceek_thrice.data.models import Message
 
 
 class RaweCeekClient(client.SignalRClient):

@@ -8,7 +8,7 @@ import pytest
 # Add the parent directory to sys.path so we can import the project modules
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from models import Device, Driver, Message, Topic
+from rawe_ceek_thrice.data.models import Device, Driver, Message, Topic
 
 
 @pytest.fixture

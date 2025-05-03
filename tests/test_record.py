@@ -1,6 +1,7 @@
 import asyncio
 import os
 import sys
+import tempfile
 from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -9,8 +10,8 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 
 import pytest
 
-from models import Message, Topic
-from record import RaweCeekClient, process_live_timing
+from rawe_ceek_thrice.data.models import Message, Topic
+from rawe_ceek_thrice.data.record import RaweCeekClient, process_live_timing
 
 
 class TestRaweCeekClient:
@@ -18,14 +19,20 @@ class TestRaweCeekClient:
     def mock_signalr_client(self):
         """Fixture to mock the SignalRClient parent class"""
         with patch(
-            "record.client.SignalRClient.__init__", return_value=None
+            "rawe_ceek_thrice.data.record.client.SignalRClient.__init__",
+            return_value=None,
         ) as mock_init:
             # Properly mock _run method to avoid "coroutine never awaited" warnings
             run_mock = AsyncMock()
-            with patch("record.client.SignalRClient._run", run_mock):
+            with patch(
+                "rawe_ceek_thrice.data.record.client.SignalRClient._run", run_mock
+            ):
                 # Mock _supervise to avoid warnings as well
                 supervise_mock = AsyncMock()
-                with patch("record.client.SignalRClient._supervise", supervise_mock):
+                with patch(
+                    "rawe_ceek_thrice.data.record.client.SignalRClient._supervise",
+                    supervise_mock,
+                ):
                     yield mock_init, run_mock
 
     def test_init(self, mock_signalr_client):
@@ -105,7 +112,7 @@ class TestRaweCeekClient:
 
         # Create a fresh client with mocked parent for second test
         with patch(
-            "record.client.SignalRClient._on_message", AsyncMock()
+            "rawe_ceek_thrice.data.record.client.SignalRClient._on_message", AsyncMock()
         ) as mock_parent_on_message:
             # Set the file and make the call
             client._output_file = MagicMock()
@@ -134,7 +141,9 @@ class TestRaweCeekClient:
         sample_message = ["TimingAppData", {"Lines": {"1": {"Line": 1}}}, 123456789]
 
         # Patch super method to avoid actual file writing and never awaited warnings
-        with patch("record.client.SignalRClient._on_message", AsyncMock()):
+        with patch(
+            "rawe_ceek_thrice.data.record.client.SignalRClient._on_message", AsyncMock()
+        ):
             # Should not raise exception
             await client._on_message(sample_message)
 
@@ -188,7 +197,10 @@ class TestRaweCeekClient:
     async def test_shutdown(self):
         """Test the shutdown method without using any AsyncMock to avoid warnings"""
         # Create a client with controlled environment
-        with patch("record.client.SignalRClient.__init__", return_value=None):
+        with patch(
+            "rawe_ceek_thrice.data.record.client.SignalRClient.__init__",
+            return_value=None,
+        ):
             # Create the client
             client = RaweCeekClient(filename=None)
 
@@ -215,8 +227,8 @@ class TestRaweCeekClient:
 
 
 @pytest.mark.asyncio
-@patch("record.RaweCeekClient")
-@patch("record.run_with_errorhandling")
+@patch("rawe_ceek_thrice.data.record.RaweCeekClient")
+@patch("rawe_ceek_thrice.data.record.run_with_errorhandling")
 @patch("asyncio.create_task")
 @patch("asyncio.wait")
 @patch("asyncio.Event")
