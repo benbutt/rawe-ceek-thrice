@@ -115,8 +115,13 @@ class F1DataProcessor:
         """Process a message asynchronously from the F1 timing data stream"""
         self.messages_processed += 1
 
-        # Log debug message every 1000 messages to show progress
-        if self.messages_processed % 1000 == 0:
+        # Progressive logging - more frequent for early messages
+        if (
+            (self.messages_processed <= 10)
+            or (self.messages_processed <= 100 and self.messages_processed % 10 == 0)
+            or (self.messages_processed <= 1000 and self.messages_processed % 100 == 0)
+            or (self.messages_processed % 1000 == 0)
+        ):
             logger.debug(f"Processed {self.messages_processed} messages so far...")
 
         # Only process TimingAppData messages
